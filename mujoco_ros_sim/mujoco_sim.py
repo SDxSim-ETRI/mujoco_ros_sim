@@ -79,8 +79,8 @@ class MujocoSimNode(Node):
             name_adr = self.mj_model.name_sensoradr[i]
             sname = self.mj_model.names[name_adr:].split(b'\x00', 1)[0].decode('utf-8')
             self.sensor_dict["sensor_names"].append(sname)
-            self.sensor_dict["sname_to_sid"][sname] = i
-            self.sensor_dict["sname_to_sdim"][sname] = self.mj_model.sensor_dim[name_adr]
+            self.sensor_dict["sname_to_sid"][sname] = self.mj_model.sensor_adr[i]
+            self.sensor_dict["sname_to_sdim"][sname] = self.mj_model.sensor_dim[i]
 
         # - Camera dict 
         self.camera_dict = {"cam_names": [], "cname_to_cid": {}, "resolution": (0, 0)}
@@ -111,7 +111,7 @@ class MujocoSimNode(Node):
         #  - Sensor slices
         self._s_slices = []  # (idx_s, ns, sname)
         for sname in self.sensor_dict["sensor_names"]:
-            idx_s = self.sensor_dict["sname_to_sadr"][sname]
+            idx_s = self.sensor_dict["sname_to_sid"][sname]
             ns    = self.sensor_dict["sname_to_sdim"][sname]
             self._s_slices.append((idx_s, ns, sname))
 
