@@ -46,7 +46,7 @@ class MujocoSimNode(Node):
 
         # MuJoCo init
         self.mj_model = load_mj_model(robot_name)
-        print_table(self, self.mj_model)
+        self.get_logger().info("\033[1;34m\n" + print_table(robot_name, self.mj_model) + "\033[0m")
         self.mj_data  = mujoco.MjData(self.mj_model)
         self.dt = self.mj_model.opt.timestep
         

@@ -11,6 +11,12 @@ from sensor_msgs.msg import Image
 from builtin_interfaces.msg import Time
 from mujoco_ros_sim_msgs.msg import NamedFloat64Array
 
+RED   = "\033[1;31m"
+YEL   = "\033[1;33m"
+GRN   = "\033[1;32m"
+BLU   = "\033[1;34m"
+RESET = "\033[0m"
+
 def load_mj_model(robot_name) -> mujoco.MjModel:
     """
     Loads a MuJoCo model from an XML file based on the provided robot name.
@@ -112,110 +118,58 @@ def load_class(full_class_string: str):
     # Return the loaded class.
     return cls
 
-def print_table(node: Node, m: mujoco.MjModel):
-    # ---------- Helper: build enum-value → name dict for joint types ----------
-    jt_enum = mujoco.mjtJoint                 # enum container for joints
-    enum2name = {}                            # maps int value → readable str
-    for attr in dir(jt_enum):                 # iterate every attribute
-        if attr.startswith("mjJNT_"):         # only keep joint type constants
-            enum2name[getattr(jt_enum, attr)] = attr[5:].title()  # mjJNT_FREE -> Free
+def print_table(robot_name: str, m: mujoco.MjModel) -> str:
+    jt_enum = mujoco.mjtJoint
+    enum2name = {getattr(jt_enum, a): a[5:].title() for a in dir(jt_enum) if a.startswith("mjJNT_")}
 
-    # ---------- Joint table header ----------
-    hdr = " id | name                 | type   | nq | nv | idx_q | idx_v"
-    sep = "----+----------------------+--------+----+----+-------+------"
-    node.get_logger().info(hdr)
-    node.get_logger().info(sep)
+    lines = []
+    lines.append("=================================================================")
+    lines.append("=================================================================")
+    lines.append(f"MuJoCo Model Information: {robot_name}")
+    lines.append(" id | name                 | type   | nq | nv | idx_q | idx_v")
+    lines.append("----+----------------------+--------+----+----+-------+------")
 
-    # ---------- Iterate over joints and print per-row ----------
     for jid in range(m.njnt):
-        adr  = m.name_jntadr[jid]                         # byte offset in names buffer
-        name = m.names[adr:].split(b'\x00', 1)[0].decode()  # null-terminated C-string
-        
-        if not name:  # if name is empty, use a placeholder
+        adr  = m.name_jntadr[jid]
+        name = m.names[adr:].split(b'\x00', 1)[0].decode()
+        if not name:
             continue
-
-        jtype     = int(m.jnt_type[jid])                  # numeric enum value
-        type_str  = enum2name.get(jtype, "Unk")           # human-readable
-
-        idx_q = int(m.jnt_qposadr[jid])                   # first qpos index
-        idx_v = int(m.jnt_dofadr[jid])                    # first qvel (dof) index
-
+        jtype    = int(m.jnt_type[jid])
+        type_str = enum2name.get(jtype, "Unk")
+        idx_q = int(m.jnt_qposadr[jid])
+        idx_v = int(m.jnt_dofadr[jid])
         next_q = m.jnt_qposadr[jid + 1] if jid + 1 < m.njnt else m.nq
         next_v = m.jnt_dofadr[jid + 1] if jid + 1 < m.njnt else m.nv
+        nq = int(next_q - idx_q)
+        nv = int(next_v - idx_v)
+        lines.append(f"{jid:3d} | {name:20s} | {type_str:6s} | {nq:2d} | {nv:2d} | {idx_q:5d} | {idx_v:4d}")
 
-        nq = int(next_q - idx_q)                          # number of qpos entries
-        nv = int(next_v - idx_v)                          # number of dof entries
-
-        # Print one formatted line
-        node.get_logger().info(
-            f"{jid:3d} | {name:20s} | {type_str:6s} |"
-            f" {nq:2d} | {nv:2d} | {idx_q:5d} | {idx_v:4d}"
-        )
-
-    # ---------- Actuator table (print after a blank line) ----------
-    node.get_logger().info("")                            # readability spacer
-
-    # Build enum-value → name dict for actuator transmission types
+    lines.append("")
     trn_enum = mujoco.mjtTrn
-    trn2name = {}
-    for attr in dir(trn_enum):
-        if attr.startswith("mjTRN_"):
-            trn2name[getattr(trn_enum, attr)] = attr[5:].title()  # mjTRN_JOINT -> Joint
-
-    # Pre-compute joint ID → name for quick lookup when actuator targets a joint
-    joint_names = {
-        jid: m.names[m.name_jntadr[jid]:].split(b'\x00', 1)[0].decode()
-        for jid in range(m.njnt)
-    }
-
-    # Actuator table header
-    ahdr = " id | name                 | trn     | target_joint"
-    asep = "----+----------------------+---------+-------------"
-    node.get_logger().info(ahdr)
-    node.get_logger().info(asep)
-
-    # Iterate over all actuators
-    for aid in range(m.nu):                                # m.nu == number of actuators
-        adr  = m.name_actuatoradr[aid]                     # byte offset to actuator name
+    trn2name = {getattr(trn_enum, a): a[5:].title() for a in dir(trn_enum) if a.startswith("mjTRN_")}
+    joint_names = {jid: m.names[m.name_jntadr[jid]:].split(b'\x00', 1)[0].decode() for jid in range(m.njnt)}
+    lines.append(" id | name                 | trn     | target_joint")
+    lines.append("----+----------------------+---------+-------------")
+    for aid in range(m.nu):
+        adr  = m.name_actuatoradr[aid]
         name = m.names[adr:].split(b'\x00', 1)[0].decode()
-
-        trn_type   = int(m.actuator_trntype[aid])          # transmission type enum
-        trn_str    = trn2name.get(trn_type, "Unk")         # readable transmission
-
-        # Each actuator has up to two target IDs in actuator_trnid.
-        # For JOINT / JOINTINPARENT the first entry is the joint index.
+        trn_type = int(m.actuator_trntype[aid])
+        trn_str  = trn2name.get(trn_type, "Unk")
         target_joint = "-"
-        if trn_type in (trn_enum.mjTRN_JOINT,
-                        trn_enum.mjTRN_JOINTINPARENT):
+        if trn_type in (trn_enum.mjTRN_JOINT, trn_enum.mjTRN_JOINTINPARENT):
             j_id = int(m.actuator_trnid[aid, 0])
             target_joint = joint_names.get(j_id, str(j_id))
+        lines.append(f"{aid:3d} | {name:20s} | {trn_str:7s} | {target_joint}")
 
-        # Log actuator info
-        node.get_logger().info(
-            f"{aid:3d} | {name:20s} | {trn_str:7s} | {target_joint}"
-        )
-        
-    # ---------- Sensor table (print after a blank line) ----------
-    node.get_logger().info("")
-
-    # enum → 문자열 매핑 --------------------
+    lines.append("")
     sens_enum = mujoco.mjtSensor
-    sens2name = {getattr(sens_enum, a): a[7:].title()
-                for a in dir(sens_enum) if a.startswith("mjSENS_")}
-
+    sens2name = {getattr(sens_enum, a): a[7:].title() for a in dir(sens_enum) if a.startswith("mjSENS_")}
     obj_enum  = mujoco.mjtObj
-    obj2name  = {getattr(obj_enum, a): a[6:].title()
-                for a in dir(obj_enum) if a.startswith("mjOBJ_")}
-
-    # 미리 body / site / joint 등의 id→name 사전 생성
-    body_names = {bid: m.names[m.name_bodyadr[bid]:].split(b'\0', 1)[0].decode()
-                for bid in range(m.nbody)}
-    site_names = {sid: m.names[m.name_siteadr[sid]:].split(b'\0', 1)[0].decode()
-                for sid in range(m.nsite)}
-    # joint_names는 위에서 이미 생성됨
+    obj2name  = {getattr(obj_enum, a): a[6:].title() for a in dir(obj_enum) if a.startswith("mjOBJ_")}
+    body_names = {bid: m.names[m.name_bodyadr[bid]:].split(b'\0', 1)[0].decode() for bid in range(m.nbody)}
+    site_names = {sid: m.names[m.name_siteadr[sid]:].split(b'\0', 1)[0].decode() for sid in range(m.nsite)}
 
     def obj_name(objtype, objid):
-        """주요 object 타입별 id→name 변환(없으면 raw id 반환)"""
         if objtype == obj_enum.mjOBJ_BODY:
             return body_names.get(objid, str(objid))
         if objtype == obj_enum.mjOBJ_SITE:
@@ -224,53 +178,32 @@ def print_table(node: Node, m: mujoco.MjModel):
             return joint_names.get(objid, str(objid))
         return str(objid)
 
-    # Print sensor table header
-    shdr = " id | name                        | type             | dim | adr | target (obj)"
-    ssep = "----+-----------------------------+------------------+-----+-----+----------------"
-    node.get_logger().info(shdr)
-    node.get_logger().info(ssep)
-
-    # Sensor Loop
+    lines.append(" id | name                        | type             | dim | adr | target (obj)")
+    lines.append("----+-----------------------------+------------------+-----+-----+----------------")
     for sid in range(m.nsensor):
         adr  = m.name_sensoradr[sid]
         name = m.names[adr:].split(b'\0', 1)[0].decode()
-
         stype = int(m.sensor_type[sid])
         tstr  = sens2name.get(stype, "Unk")
-
         dim   = int(m.sensor_dim[sid])
         sadr  = int(m.sensor_adr[sid])
-
         objtype = int(m.sensor_objtype[sid])
         objid   = int(m.sensor_objid[sid])
-        target  = f"{obj2name.get(objtype,'-')}:{obj_name(objtype,objid)}" \
-                if objid >= 0 else "-"
+        target  = f"{obj2name.get(objtype,'-')}:{obj_name(objtype,objid)}" if objid >= 0 else "-"
+        lines.append(f"{sid:3d} | {name:27s} | {tstr:16s} | {dim:3d} | {sadr:3d} | {target}")
 
-        node.get_logger().info(
-            f"{sid:3d} | {name:27s} | {tstr:16s} | {dim:3d} | {sadr:3d} | {target}"
-        )
-
-      # ---------- Camera table (id, name, mode, resolution) ----------
-    node.get_logger().info("")
-
-    chdr = " id | name                        | mode     | resolution"
-    csep = "----+-----------------------------+----------+------------"
-    node.get_logger().info(chdr)
-    node.get_logger().info(csep)
-
-    # mode enum → 문자열 매핑 (가능하면 자동 추출, 없으면 기본 매핑)
+    lines.append("")
+    lines.append(" id | name                        | mode     | resolution")
+    lines.append("----+-----------------------------+----------+------------")
     mode_map = {}
     cam_enum = getattr(mujoco, "mjtCamLight", None)
     if cam_enum is not None:
         for attr in dir(cam_enum):
             if attr.startswith("mjCAMLIGHT_"):
-                # mjCAMLIGHT_FIXED -> Fixed
                 mode_map[getattr(cam_enum, attr)] = attr[10:].title()
     else:
-        # fallback (주요 모드)
         mode_map = {0: "Fixed", 1: "Track", 2: "Trackcom"}
 
-    # 해상도: MuJoCo는 per-camera 해상도가 아니라 global offscreen 설정을 사용
     try:
         offw = int(m.vis.global_.offwidth)
         offh = int(m.vis.global_.offheight)
@@ -280,11 +213,8 @@ def print_table(node: Node, m: mujoco.MjModel):
 
     ncam = getattr(m, "ncam", 0)
     for cid in range(ncam):
-        # name
         cadr  = m.name_camadr[cid]
         cname = m.names[cadr:].split(b'\x00', 1)[0].decode()
-
-        # mode
         if hasattr(m, "cam_mode"):
             try:
                 mode_val = int(m.cam_mode[cid])
@@ -293,8 +223,11 @@ def print_table(node: Node, m: mujoco.MjModel):
                 mode_str = "-"
         else:
             mode_str = "-"
+        lines.append(f"{cid:3d} | {cname:27s} | {mode_str:8s} | {res_str}")
+    lines.append("=================================================================")
+    lines.append("=================================================================")
+    return "\n".join(lines)
 
-        node.get_logger().info(f"{cid:3d} | {cname:27s} | {mode_str:8s} | {res_str}")
         
 def to_NamedFloat64ArrayMsg(name: str, data):
     arr = np.array(data, dtype=float).ravel() # flatten to 1D array
