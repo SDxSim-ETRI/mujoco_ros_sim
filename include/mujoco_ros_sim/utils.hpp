@@ -122,25 +122,28 @@ namespace MujocoRosSim
     for (int aid = 0; aid < m->nu; ++aid) {
       const char* aname = name_or(m, mjOBJ_ACTUATOR, aid);
       int trn_type = m->actuator_trntype[aid];
-      std::string target_joint = "-";
+
+    int jid = -1;
+    #ifdef mjNTRN
+    for (int k = 0; k < mjNTRN; ++k) {
+        int cand = m->actuator_trnid[aid * mjNTRN + k];
+        if (cand >= 0) { jid = cand; break; }
+    }
+    #else
+    for (int k = 0; k < 2; ++k) {
+        int cand = m->actuator_trnid[aid * 2 + k];
+        if (cand >= 0) { jid = cand; break; }
+    }
+    #endif
+
+    std::string target_joint = "-";
+    if (jid >= 0 && jid < m->njnt)
+    target_joint = name_or(m, mjOBJ_JOINT, jid);
+    else if (jid >= 0)
+    target_joint = std::to_string(jid);
+
   
-      if (trn_type == mjTRN_JOINT || trn_type == mjTRN_JOINTINPARENT) {
-        // 첫 번째 trnid 슬롯이 대상 joint id
-        int jid = 0;
-        #ifdef mjNTRN
-          jid = m->actuator_trnid[aid * mjNTRN + 0];
-        #else
-          // 일부 빌드에서는 1개 슬롯만 있을 수 있음(구버전 대비 안전 가드)
-          jid = m->actuator_trnid[aid];
-        #endif
-        if (jid >= 0 && jid < m->njnt) {
-          target_joint = name_or(m, mjOBJ_JOINT, jid);
-        } else {
-          target_joint = std::to_string(jid);
-        }
-      }
-  
-      out << std::setw(3) << aid << " | "
+      out << std::right << std::setw(3) << aid << " | "
           << std::left << std::setw(20) << (aname ? aname : "-") << " | "
           << std::left << std::setw(7)  << TrnTypeName(trn_type) << " | "
           << target_joint << "\n";
@@ -168,7 +171,7 @@ namespace MujocoRosSim
         target = otype + ":" + (oname ? oname : std::to_string(objid));
       }
   
-      out << std::setw(3) << sid << " | "
+      out << std::right << std::setw(3) << sid << " | "
           << std::left  << std::setw(27) << (sname ? sname : "-") << " | "
           << std::left  << std::setw(16) << SensorTypeName(stype) << " | "
           << std::right << std::setw(3)  << dim << " | "
@@ -192,7 +195,7 @@ namespace MujocoRosSim
       std::string mode_str = "-";
       // (필요하면 프로젝트에서 별도 확장 저장해 쓰세요)
   
-      out << std::setw(3) << cid << " | "
+      out << std::right << std::setw(3) << cid << " | "
           << std::left  << std::setw(27) << (cname ? cname : "-") << " | "
           << std::left  << std::setw(8)  << mode_str << " | "
           << res_str << "\n";
