@@ -2,7 +2,7 @@
 <package format="3">
   <name>mujoco_ros_sim</name>
   <version>0.0.1</version>
-  <description>ControllerInterface + factory + Python adapter + loader node + MuJoCo sim runner</description>
+  <description>ControllerInterface + Python adapter + loader node + MuJoCo sim runner</description>
   <maintainer email="yoonjh98@snu.ac.kr">JunheonYoon</maintainer>
   <license>MIT</license>
 

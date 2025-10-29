@@ -27,7 +27,8 @@
 
 #include <pluginlib/class_loader.hpp>
 
-#include "mujoco_ros_sim/controller_factory.hpp"
+#include "mujoco_ros_sim/controller_interface.hpp"
+#include "mujoco_ros_sim/py_controller.hpp"
 
 #define MUJOCO_PLUGIN_DIR "mujoco_plugin"
 
@@ -81,7 +82,6 @@ namespace MujocoRosSim
             // ==================================== For MuJoCo Controller =================================================
             // plugin loader 
             std::shared_ptr<ControllerInterface> controller_{nullptr};
-            std::unique_ptr<pluginlib::ClassLoader<ControllerFactory>> loader_;
             std::string controller_class_;
     
             std::thread control_thread_;  // control worker

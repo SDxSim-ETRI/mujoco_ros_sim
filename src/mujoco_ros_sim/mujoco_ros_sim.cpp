@@ -555,8 +555,9 @@ namespace MujocoRosSim
             for (int i = 0; i < model_->nu; ++i)
             {
                 const char* nm = mj_id2name(model_, mjOBJ_ACTUATOR, i);
-                const int id = model_->actuator_trnid[2 * i];
-                actName2actID_[nm] = id;
+                // const int id = model_->actuator_trnid[2 * i];
+                // actName2actID_[nm] = id;
+                actName2actID_[nm] = i;
             }
     
             // sensors slicing
@@ -726,100 +727,70 @@ namespace MujocoRosSim
 
     bool MujocoRosSimNode::createController(std::string controller_spec)
     {
-
-        // empty spec guard
         if (controller_spec.empty()) 
         {
             LOGE(this, "Controller is empty. Cannot load controller.");
             return false;
         }
 
-        // pluginlib loader
-        loader_ = std::make_unique<pluginlib::ClassLoader<ControllerFactory>>("mujoco_ros_sim", "MujocoRosSim::ControllerFactory");
-
         // Optional '@path' → python_path
         std::string python_path;
-        if (auto at = controller_spec.find('@'); at != std::string::npos) 
-        {
-        python_path = controller_spec.substr(at + 1);
-        controller_spec.erase(at);
+        if (auto at = controller_spec.find('@'); at != std::string::npos) {
+            python_path = controller_spec.substr(at + 1);
+            controller_spec.erase(at);
         }
 
-        // init state
-        std::string plugin_to_load = controller_spec;
-        std::string python_class;
-        bool use_python = false;
-
-        // discover C++ plugin
-        // Check if the class is available in plugin loader
+        // ---------- 1) ControllerInterface Load ----------
         try 
         {
-            if (!(loader_->isClassAvailable(controller_spec))) 
+            pluginlib::ClassLoader<ControllerInterface> loader("mujoco_ros_sim", "MujocoRosSim::ControllerInterface");
+
+            if (loader.isClassAvailable(controller_spec)) 
             {
-                LOGW(this, "C++ plugin not found in loader: %s → switching to Python fallback", controller_spec.c_str());
-                use_python = true;
+                controller_ = loader.createSharedInstance(controller_spec);
+                controller_->configure(shared_from_this());
+                LOGI(this, "Loaded ControllerInterface plugin: %s", controller_spec.c_str());
             }
         } 
         catch (const std::exception& e) 
         {
-            LOGW(this, "Exception while checking class availability: %s", e.what());
-            use_python = true;
+            LOGW(this, "Direct ControllerInterface load failed: %s", e.what());
         } 
         catch (...) 
         {
-            LOGW(this, "Unknown error while checking class availability. Fallback to Python.");
-            use_python = true;
+            LOGW(this, "Direct ControllerInterface load failed with unknown error.");
         }
 
-        // try C++ instantiation
-        if (!use_python)
-        {
-            try 
-            {
-                auto factory = loader_->createSharedInstance(plugin_to_load);
-                controller_  = factory->create(shared_from_this());
-            } 
-            catch (const std::exception& e) 
-            {
-                LOGW(this, "Failed to load C++ controller (%s): %s", plugin_to_load.c_str(), e.what());
-                use_python = true;
-            } 
-            catch (...) 
-            {
-                LOGW(this, "Unknown error while creating C++ controller (%s). Switching to Python.", plugin_to_load.c_str());
-                use_python = true;
-            }
-        }
-
-        // python fallback path
-        if (use_python) 
+        // ---------- 2) Python fallback ----------
+        if (!controller_) 
         {
             try 
             {
                 auto slash = controller_spec.find('/');
-                if (slash == std::string::npos)
+                if (slash == std::string::npos) 
                 {
                     LOGE(this, "Invalid controller_class format. Expected 'pkg/Class' but got '%s'", controller_spec.c_str());
                     return false;
                 }
 
-                // build "pkg:Class"
-                python_class = controller_spec.substr(0, slash) + ":" + controller_spec.substr(slash + 1);
-                plugin_to_load = "mujoco_ros_sim/py_controller";
+                std::string python_class = controller_spec.substr(0, slash) + ":" + controller_spec.substr(slash + 1);
+                std::string plugin_to_load = "mujoco_ros_sim/py_controller";
 
-                // declare fallback params
+                // declare parameters if not existing
                 if (!this->has_parameter("python_class")) this->declare_parameter<std::string>("python_class", "");
                 if (!this->has_parameter("python_path"))  this->declare_parameter<std::string>("python_path", "");
 
-                // set parameters
                 std::vector<rclcpp::Parameter> params;
                 params.emplace_back("python_class", rclcpp::ParameterValue(python_class));
                 if (!python_path.empty()) params.emplace_back("python_path", rclcpp::ParameterValue(python_path));
                 this->set_parameters(params);
 
-                // create python-backed controller
-                auto factory = loader_->createSharedInstance(plugin_to_load);
-                controller_  = factory->create(shared_from_this());
+                pluginlib::ClassLoader<ControllerInterface> loader_py("mujoco_ros_sim", "MujocoRosSim::ControllerInterface");
+
+                controller_ = loader_py.createSharedInstance(plugin_to_load);
+                controller_->configure(shared_from_this());
+
+                LOGI(this, "Loaded Python-backed ControllerInterface: %s", python_class.c_str());
             } 
             catch (const std::exception& e) 
             {
@@ -833,17 +804,16 @@ namespace MujocoRosSim
             }
         }
 
-        // final null check
         if (!controller_) 
         {
-            LOGE(this, "Controller creation failed — controller_ is null after loading (%s)", plugin_to_load.c_str());
+            LOGE(this, "Controller creation failed — controller_ is null after loading (%s)", controller_spec.c_str());
             return false;
         }
 
-        // success log
-        LOGI(this, "Controller successfully loaded: %s", plugin_to_load.c_str());
+        LOGI(this, "Controller successfully loaded.");
         return true;
     }
+
 
     void MujocoRosSimNode::initController() 
     { 
@@ -942,7 +912,6 @@ namespace MujocoRosSim
 
             // retrieve control map
             CtrlInputMap u_map = controller_->getCtrlInput();
-            u_map = controller_->getCtrlInput();
             const auto t4 = std::chrono::steady_clock::now();
 
             {
@@ -967,9 +936,7 @@ namespace MujocoRosSim
                         act_name.c_str(), act_id, model_->nu);
                         continue;
                     }
-
-                    double effort = u_val;
-                    data_->ctrl[act_id] = effort;
+                    data_->ctrl[act_id] = u_val;
                 }
             }
             const auto t5 = std::chrono::steady_clock::now();
@@ -999,6 +966,12 @@ namespace MujocoRosSim
                 << "totalStep took "   << std::fixed << std::setprecision(6) << total_ms       << " ms\n"
                 << "===================================";
                 LOGW(this, oss.str().c_str());
+            }
+
+            // for python controller
+            if (auto pyctrl = std::dynamic_pointer_cast<MujocoRosSim::PyController>(controller_)) 
+            {
+                pyctrl->spinOnce(0.0);
             }
 
 
