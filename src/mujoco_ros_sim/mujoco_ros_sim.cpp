@@ -48,6 +48,12 @@ namespace MujocoRosSim
             LOGE(this, "Model XML not found (robot_name or model_xml).");
             throw std::runtime_error("model not found");
         }
+        
+        if (!std::filesystem::exists(std::filesystem::path(xml))) 
+        {
+            LOGE(this, "There is no MJCF file at %s.", xml.c_str());
+            throw std::runtime_error("model not found");
+        }
 
         // physics thread
         physics_thread_ = std::thread(&MujocoRosSimNode::PhysicsThread, this, sim_.get(), xml);

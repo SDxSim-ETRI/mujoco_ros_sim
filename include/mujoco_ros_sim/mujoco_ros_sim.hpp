@@ -12,6 +12,7 @@
 #include <new>
 #include <string>
 #include <thread>
+#include <filesystem>
 
 #include <mujoco/mujoco.h>
 #include "mujoco/glfw_adapter.h"
